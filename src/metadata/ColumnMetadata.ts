@@ -10,6 +10,7 @@ import { ValueTransformer } from "../decorator/options/ValueTransformer"
 import { ApplyValueTransformers } from "../util/ApplyValueTransformers"
 import { ObjectUtils } from "../util/ObjectUtils"
 import { InstanceChecker } from "../util/InstanceChecker"
+import { VirtualColumnOptions } from "../decorator/options/VirtualColumnOptions"
 
 /**
  * This metadata contains all information about entity's column.
@@ -239,6 +240,20 @@ export class ColumnMetadata {
     isVirtual: boolean = false
 
     /**
+     * Indicates if column is a virtual property. Virtual properties are not mapped to the entity.
+     * This property is used in tandem the virtual column decorator.
+     * @See https://typeorm.io/decorator-reference#virtualcolumn for more details.
+     */
+    isVirtualProperty: boolean = false
+
+    /**
+     * Query to be used to populate the column data. This query is used when generating the relational db script.
+     * The query function is called with the current entities alias either defined by the Entity Decorator or automatically
+     * @See https://typeorm.io/decorator-reference#virtualcolumn for more details.
+     */
+    query?: (alias: string) => string
+
+    /**
      * Indicates if column is discriminator. Discriminator columns are not mapped to the entity.
      */
     isDiscriminator: boolean = false
@@ -448,6 +463,7 @@ export class ColumnMetadata {
         if (options.args.options.array)
             this.isArray = options.args.options.array
         if (options.args.mode) {
+            this.isVirtualProperty = options.args.mode === "virtual-property"
             this.isVirtual = options.args.mode === "virtual"
             this.isTreeLevel = options.args.mode === "treeLevel"
             this.isCreateDate = options.args.mode === "createDate"
@@ -456,12 +472,18 @@ export class ColumnMetadata {
             this.isVersion = options.args.mode === "version"
             this.isObjectId = options.args.mode === "objectId"
         }
+        if (this.isVirtualProperty) {
+            this.isInsert = false
+            this.isUpdate = false
+        }
         if (options.args.options.transformer)
             this.transformer = options.args.options.transformer
         if (options.args.options.spatialFeatureType)
             this.spatialFeatureType = options.args.options.spatialFeatureType
         if (options.args.options.srid !== undefined)
             this.srid = options.args.options.srid
+        if ((options.args.options as VirtualColumnOptions).query)
+            this.query = (options.args.options as VirtualColumnOptions).query
         if (this.isTreeLevel)
             this.type = options.connection.driver.mappedDataTypes.treeLevel
         if (this.isCreateDate) {
@@ -672,19 +694,29 @@ export class ColumnMetadata {
                 entity[this.relationMetadata.propertyName] &&
                 ObjectUtils.isObject(entity[this.relationMetadata.propertyName])
             ) {
-                const map = this.relationMetadata.joinColumns.reduce(
-                    (map, joinColumn) => {
-                        const value =
-                            joinColumn.referencedColumn!.getEntityValueMap(
-                                entity[this.relationMetadata!.propertyName],
-                            )
-                        if (value === undefined) return map
-                        return OrmUtils.mergeDeep(map, value)
-                    },
-                    {},
-                )
-                if (Object.keys(map).length > 0)
-                    return { [this.propertyName]: map }
+                if (this.relationMetadata.joinColumns.length > 1) {
+                    const map = this.relationMetadata.joinColumns.reduce(
+                        (map, joinColumn) => {
+                            const value =
+                                joinColumn.referencedColumn!.getEntityValueMap(
+                                    entity[this.relationMetadata!.propertyName],
+                                )
+                            if (value === undefined) return map
+                            return OrmUtils.mergeDeep(map, value)
+                        },
+                        {},
+                    )
+                    if (Object.keys(map).length > 0)
+                        return { [this.propertyName]: map }
+                } else {
+                    const value =
+                        this.relationMetadata.joinColumns[0].referencedColumn!.getEntityValue(
+                            entity[this.relationMetadata!.propertyName],
+                        )
+                    if (value) {
+                        return { [this.propertyName]: value }
+                    }
+                }
 
                 return undefined
             } else {
@@ -692,8 +724,9 @@ export class ColumnMetadata {
                     entity[this.propertyName] !== undefined &&
                     (returnNulls === false ||
                         entity[this.propertyName] !== null)
-                )
+                ) {
                     return { [this.propertyName]: entity[this.propertyName] }
+                }
 
                 return undefined
             }

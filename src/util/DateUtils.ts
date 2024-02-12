@@ -1,5 +1,5 @@
 import { ColumnMetadata } from "../metadata/ColumnMetadata"
-import { parseISO } from "date-fns"
+import dayjs from "dayjs"
 
 /**
  * Provides utilities to transform hydrated and persisted data.
@@ -26,7 +26,7 @@ export class DateUtils {
      * Converts given value into date string in a "YYYY-MM-DD" format.
      */
     static mixedDateToDateString(value: string | Date): string {
-        if (value instanceof Date)
+        if (value instanceof Date) {
             return (
                 this.formatZerolessValue(value.getFullYear(), 4) +
                 "-" +
@@ -34,6 +34,7 @@ export class DateUtils {
                 "-" +
                 this.formatZerolessValue(value.getDate())
             )
+        }
 
         return value
     }
@@ -61,7 +62,9 @@ export class DateUtils {
          * https://stackoverflow.com/a/2587398
          */
         let date =
-            typeof mixedDate === "string" ? parseISO(mixedDate) : mixedDate
+            typeof mixedDate === "string"
+                ? dayjs(mixedDate).toDate()
+                : mixedDate
 
         if (toUtc)
             date = new Date(
